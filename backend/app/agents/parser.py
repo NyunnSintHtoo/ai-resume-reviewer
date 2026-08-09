@@ -34,6 +34,27 @@ _BULLET_RE = re.compile(r"^\s*[-•·*▪◦‣o]\s+(.*)$")
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 _PHONE_RE = re.compile(r"(\+?\d[\d\s().-]{7,}\d)")
 
+# PDF extractors (pypdf et al.) often flatten layout: bullets get merged into
+# paragraphs and ALL-CAPS headings end up glued to surrounding text. Before
+# line-based parsing, put inline bullets and ALL-CAPS heading aliases on their
+# own lines. Matching the alias in upper case only keeps prose mentions
+# ("communication skills") from being treated as headings.
+_INLINE_BULLET_RE = re.compile(r"\s[•·▪◦‣]\s+")
+_UPPER_HEADING_RES = [
+    re.compile(
+        r"(?<![A-Za-z])" + r"\s+".join(re.escape(w) for w in alias.upper().split()) + r"(?![A-Za-z])"
+    )
+    for aliases in SECTION_ALIASES.values()
+    for alias in aliases
+]
+
+
+def _normalize(text: str) -> str:
+    text = _INLINE_BULLET_RE.sub("\n• ", text)
+    for heading_re in _UPPER_HEADING_RES:
+        text = heading_re.sub(lambda m: "\n" + m.group(0) + "\n", text)
+    return text
+
 
 @dataclass
 class ParsedSection:
@@ -72,6 +93,8 @@ class ParsedResume:
 
 def _match_heading(line: str) -> tuple[str, str] | None:
     """Return (canonical, as-written) if the line looks like a section heading."""
+    if line.strip().endswith("."):
+        return None  # sentence fragment, not a heading
     stripped = line.strip().strip(":").strip()
     if not stripped or len(stripped) > 40:
         return None
@@ -83,6 +106,7 @@ def _match_heading(line: str) -> tuple[str, str] | None:
 
 
 def parse_resume(text: str) -> ParsedResume:
+    text = _normalize(text)
     parsed = ParsedResume(raw_text=text, word_count=len(text.split()))
     parsed.email = m.group(0) if (m := _EMAIL_RE.search(text)) else None
     parsed.phone = m.group(1).strip() if (m := _PHONE_RE.search(text)) else None
@@ -100,10 +124,11 @@ def parse_resume(text: str) -> ParsedResume:
             current = ParsedSection(name=canon, heading=heading)
             parsed.sections.append(current)
             continue
+        line = re.sub(r"\s{2,}", " ", line.strip())  # collapse extractor double-spacing
         bullet = _BULLET_RE.match(line)
         if bullet:
             current.bullets.append(bullet.group(1).strip())
-        current.lines.append(line.strip())
+        current.lines.append(line)
 
     # Drop an empty header pseudo-section
     parsed.sections = [s for s in parsed.sections if s.lines or s.name != "header"]

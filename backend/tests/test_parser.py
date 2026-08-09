@@ -36,3 +36,25 @@ def test_heading_detection_is_case_insensitive():
     parsed = parse_resume("WORK EXPERIENCE\n- Did a thing\nEDUCATION:\nSome school")
     assert "experience" in parsed.section_names
     assert "education" in parsed.section_names
+
+
+MANGLED_PDF_TEXT = (
+    "Jane Doe 778-000-0000 | jane@example.com | Vancouver,BC    SKILLS\n"
+    "Python,\nSQL,\ndashboards.\n"
+    " AI  Tools :  assorted  helpers  used  for  personal  projects.\n"
+    "  AWARDS   Math  Olympiad  Bronze  •  Built  ETL  pipelines  cutting  costs  3%\n"
+    " •  Produced  dashboards  supporting  decisions\n"
+    "WORK  EXPERIENCE  Analyst  @  Acme       2024  •  Analyzed  expenses\n"
+    "EDUCATION  UBC  BSc  Data  Science\n"
+)
+
+
+def test_parses_mangled_pdf_extraction():
+    """PDF extractors glue headings into surrounding text and merge bullets;
+    the normalizer must still find the sections."""
+    parsed = parse_resume(MANGLED_PDF_TEXT)
+    names = parsed.section_names
+    for expected in ("skills", "awards", "experience", "education"):
+        assert expected in names, names
+    assert "projects" not in names  # sentence fragment must not become a heading
+    assert len(parsed.all_bullets) >= 3
